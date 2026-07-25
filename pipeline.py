@@ -66,17 +66,149 @@ def transform_customers(df_customers: pd.DataFrame)-> pd.DataFrame:
     except Exception as e:  
         logger.exception("Unexpected error while transforming data")
         raise
+
+@task
+def load_data(data_dict, db_path: str = "analytics.db"):
+    logger = get_run_logger()
+    try:
+        logger.info("Starting connection to analytics.db")
+
+        conn = sqlite3.connect(db_path)
+        logger.info("Connected to analytics.db")
+
+        conn.execute("PRAGMA foreign_keys = ON")
+        cursor = conn.cursor()
+        customers_data = data_dict.get("customers", pd.DataFrame())
+        orders_data = data_dict.get("orders", pd.DataFrame())
+
+        orphan_orders = orders_data[
+        ~orders_data["customer_id"].isin(customers_data["customer_id"])
+        ]
+
+        if not orphan_orders.empty:
+            logger.warning(
+                "Skipping %d orders because customer_id does not exist in dim_customers",
+                len(orphan_orders)
+            )
+
+        orders_data = orders_data[
+            orders_data["customer_id"].isin(customers_data["customer_id"])
+        ]
+
+        logger.info("Creating tables dim_customers")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dim_customers (
+            customer_id INTEGER PRIMARY KEY,
+            full_name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            phone TEXT ,
+            signup_date TEXT NOT NULL
+        )
+        """)
+
+        logger.info("Creating tables fct_orders")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fct_orders (
+            order_id INTEGER PRIMARY KEY,
+            customer_id INTEGER NOT NULL,
+            total_amount REAL NOT NULL,
+            usd_amount REAL ,
+            currency TEXT NOT NULL,
+            status TEXT NOT NULL,
+            order_date TEXT ,
+            FOREIGN KEY (customer_id)
+              REFERENCES dim_customers(customer_id)
+        )
+        """)
+
+        logger.info("Inserting data into dim_customers")
+        for _, customer in customers_data.iterrows():
+           cursor.execute(
+                """
+                INSERT INTO dim_customers (
+                    customer_id,
+                    full_name,
+                    email,
+                    phone,
+                    signup_date
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(customer_id) DO UPDATE SET
+                    full_name = excluded.full_name,
+                    email = excluded.email,
+                    phone = excluded.phone,
+                    signup_date = excluded.signup_date
+
+                """,
+                (
+                    customer["customer_id"],
+                    customer["full_name"],
+                    customer["email"],
+                    customer["phone"],
+                    customer["signup_date"],
+                )
+           )
     
+        logger.info("Inserting data into fct_orders")
+        for _, order in orders_data.iterrows():
+            cursor.execute(
+                """
+                INSERT INTO fct_orders (
+                    order_id,
+                    customer_id,
+                    total_amount,
+                    usd_amount,
+                    currency,
+                    status,
+                    order_date
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(order_id) DO UPDATE SET
+                    customer_id = excluded.customer_id,
+                    total_amount = excluded.total_amount,
+                    usd_amount = excluded.usd_amount,
+                    currency = excluded.currency,
+                    status = excluded.status,
+                    order_date = excluded.order_date
+                """,
+                (
+                    order["order_id"],
+                    order["customer_id"],
+                    order["total_amount"],
+                    order["usd_amount"],
+                    order["currency"],
+                    order["status"],
+                    order["order_date"],
+                )
+            )
+
+        conn.commit()
+        logger.info("Data loaded successfully")
+    except Exception as e:
+        conn.rollback()
+        logger.exception("Unexpected error while loading data")
+        raise
+    finally:
+        conn.close()
+    
+
+
 @flow
 def main_etl():
     logger = get_run_logger()
     try:
         logger.info("Starting ETL flow")
-        logger.info("Extracting data from SQLite database")
         source_data = extract_data()
-        print(source_data)
-        customers = transform_customers(source_data)
-        orders = transform_orders(source_data)
+
+        customers = transform_customers(source_data["customers"])
+
+        orders = transform_orders(source_data["orders"], source_data["exchange_rates"])
+
+        load_data(
+       { "customers": customers, "orders": orders }
+        )
+        
+        logger.info("ETL flow completed")
     except Exception as e:
         logger.exception("ETL flow failed", exc_info=e)
         raise
