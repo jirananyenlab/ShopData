@@ -54,7 +54,7 @@ def standardize_phone_number(df: pd.DataFrame, column_name: str = "phone") -> pd
         raise KeyError(f"Column not found: {column_name}")
     result = df.copy()
     result[column_name] = (
-        result[column_name].astype("string").str.replace(r"\D", "", regex=True)
+        result[column_name].str.replace(r"\D", "", regex=True)
     )
     return result
 
