@@ -1,80 +1,7 @@
-from prefect import flow, task , get_run_logger
+from prefect import flow, task, get_run_logger
 import sqlite3
 import pandas as pd
 
-@task
-def extract_data(db_path: str = "shopdata.db")-> pd.DataFrame:
-    logger = get_run_logger()
-    try:
-        conn = sqlite3.connect(db_path)
-
-        df_exchange_rates = pd.read_sql("SELECT * FROM vw_exchange_rates", conn)
-        df_customers = pd.read_sql("SELECT * FROM raw_customers", conn)
-        df_orders = pd.read_sql("SELECT * FROM raw_orders", conn)
-
-        conn.close()
-
-        logger.info(f"Extracted {len(df_exchange_rates)} rows from vw_exchange_rates")
-        logger.info(f"Extracted {len(df_customers)} rows from raw_customers")
-        logger.info(f"Extracted {len(df_orders)} rows from raw_orders")
-        return  {"exchange_rates": df_exchange_rates, "customers": df_customers, "orders": df_orders}
-    except sqlite3.Error as e:
-        logger.exception(f"SQLite error: {e}")
-        raise
-
-    except Exception as e:
-        logger.exception("Unexpected error while extracting orders", exc_info=e)
-        raise
-
-@task
-def transform_orders(df_orders: pd.DataFrame, df_exchange_rates: pd.DataFrame)-> pd.DataFrame:
-    logger = get_run_logger()
-    try:
-        logger.info("Starting transformation orders")
-
-        df_orders = df_orders[df_orders["total_amount"] > 0]
-        df_orders["currency"] = df_orders["currency"].fillna("USD")
-        df_orders = df_orders.merge(
-            df_exchange_rates,
-            left_on=["currency", "order_date"],
-            right_on=["currency", "date"],
-            how="left"
-        )
-        logger.info(f"columns after merge: {df_orders}")
-        logger.info(f"total_amount: {df_orders['total_amount']}, rate_to_usd: {df_orders['rate_to_usd']}")
-        df_orders["usd_amount"] = df_orders["total_amount"]
-
-        mask = (df_orders["currency"] != "USD") & (df_orders["rate_to_usd"].notna())
-
-        df_orders.loc[mask, "usd_amount"] = (
-            df_orders.loc[mask, "total_amount"]
-            * df_orders.loc[mask, "rate_to_usd"]
-        )
-
-        logger.info("Finished transformation orders")
-        return df_orders
-    except Exception as e:
-        logger.exception("Unexpected error while transforming orders")
-        raise
-      
-
-@task
-def transform_customers(df_customers: pd.DataFrame)-> pd.DataFrame:
-    logger = get_run_logger()
-    try:
-        logger.info("Starting transformation customers")
-
-        df_customers = df_customers.sort_values("signup_date").drop_duplicates(subset='customer_id', keep="last")
-        df_customers["phone"] = df_customers["phone"].str.replace(r"\D", "", regex=True)
-        df_customers["email"] = df_customers["email"].fillna("unknown@domain.com")
-
-        logger.info("Finished transformation customers")
-        return df_customers
-
-
-    except Exception as e:  
-        logger.exception("Unexpected error while transforming data")
-        raise
 
 def filter_orphan_orders(customers_data, orders_data, logger):
     valid_orders = orders_data[
@@ -115,6 +42,115 @@ def create_tables(cursor):
                 REFERENCES dim_customers(customer_id)
         )
     """)
+
+def fill_null_values(df: pd.DataFrame, column_name: str, fill_value: object) -> pd.DataFrame:
+    df = df.copy()
+    if column_name in df.columns:
+        df[column_name] = df[column_name].fillna(fill_value)
+    return df
+
+def standardize_phone_number(df: pd.DataFrame, column_name: str = "phone") -> pd.DataFrame:
+    if column_name not in df.columns:
+        raise KeyError(f"Column not found: {column_name}")
+    result = df.copy()
+    result[column_name] = (
+        result[column_name].astype("string").str.replace(r"\D", "", regex=True)
+    )
+    return result
+
+def deduplicate_customers(df_customers: pd.DataFrame) -> pd.DataFrame:
+    return (
+        df_customers.sort_values("signup_date")
+        .drop_duplicates(subset="customer_id", keep="last")
+        .copy()
+    )
+
+def convert_currency_to_usd(orders: pd.DataFrame, exchange_rates: pd.DataFrame) -> pd.DataFrame:
+  
+    result = orders.copy().merge(
+        exchange_rates,
+        left_on=["currency", "order_date"],
+        right_on=["currency", "date"],
+        how="left",
+    )
+    effective_rate = result["rate_to_usd"].where(
+        result["currency"].ne("USD"), 1.0
+    )
+    result["usd_amount"] = result["total_amount"] * effective_rate.fillna(1.0)
+    return result
+
+def filter_positive_order_amounts(df: pd.DataFrame, column_name: str = "total_amount") -> pd.DataFrame:
+    return df.loc[df[column_name] > 0].copy()
+
+@task
+def extract_data(db_path: str = "shopdata.db")-> pd.DataFrame:
+    logger = get_run_logger()
+    try:
+        conn = sqlite3.connect(db_path)
+
+        df_exchange_rates = pd.read_sql("SELECT * FROM vw_exchange_rates", conn)
+        df_customers = pd.read_sql("SELECT * FROM raw_customers", conn)
+        df_orders = pd.read_sql("SELECT * FROM raw_orders", conn)
+
+        conn.close()
+
+        logger.info(f"Extracted {len(df_exchange_rates)} rows from vw_exchange_rates")
+        logger.info(f"Extracted {len(df_customers)} rows from raw_customers")
+        logger.info(f"Extracted {len(df_orders)} rows from raw_orders")
+        return  {"exchange_rates": df_exchange_rates, "customers": df_customers, "orders": df_orders}
+    except sqlite3.Error as e:
+        logger.exception(f"SQLite error: {e}")
+        raise
+
+    except Exception as e:
+        logger.exception("Unexpected error while extracting orders", exc_info=e)
+        raise
+
+
+
+@task
+def transform_orders(df_orders: pd.DataFrame, df_exchange_rates: pd.DataFrame)-> pd.DataFrame:
+    logger = get_run_logger()
+    try:
+        logger.info("Starting transformation orders")
+        logger.info("Removing orders with non-positive total_amount")
+        df_orders = filter_positive_order_amounts(df_orders, "total_amount")
+        logger.info("Defaulting missing currency to USD")
+        df_orders = fill_null_values(df_orders, "currency", "USD")
+
+        logger.info("Converting currency to USD")
+        df_orders = convert_currency_to_usd(df_orders, df_exchange_rates)
+
+        logger.info("Finished transformation orders")
+        return df_orders
+    except Exception as e:
+        logger.exception("Unexpected error while transforming orders")
+        raise
+      
+
+@task
+def transform_customers(df_customers: pd.DataFrame)-> pd.DataFrame:
+    logger = get_run_logger()
+    try:
+        logger.info("Starting transformation customers")
+        logger.info(
+            "Removing duplicate customers and keeping the latest signup_date"
+        )
+        df_customers = deduplicate_customers(df_customers)
+
+        logger.info("Standardizing phone numbers")
+        df_customers = standardize_phone_number(df_customers, "phone")
+
+        logger.info("Filling missing emails")
+        df_customers = fill_null_values(df_customers, "email", "unknown@domain.com")
+
+        logger.info("Finished transformation customers")
+        return df_customers
+
+
+    except Exception as e:  
+        logger.exception("Unexpected error while transforming data")
+        raise
 
 @task
 def load_data(data_dict, db_path: str = "analytics.db"):
@@ -206,8 +242,6 @@ def load_data(data_dict, db_path: str = "analytics.db"):
     finally:
         conn.close()
     
-
-
 @flow
 def main_etl():
     logger = get_run_logger()
