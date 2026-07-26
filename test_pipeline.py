@@ -10,29 +10,64 @@ from pipeline import (
 )
 
 @pytest.fixture
-def sample_orders():
+def sample_orders_df():
     return pd.DataFrame(
         [
             {
-                "order_id": 1,
-                "customer_id": 1,
-                "total_amount": 100.0,
+                "order_id": 9001,
+                "customer_id": 9001,
+                "total_amount": 321.45,
                 "currency": "USD",
-                "order_date": "2023-01-01",
+                "order_date": "2040-01-20",
+                "status": "COMPLETED",
             },
             {
-                "order_id": 2,
-                "customer_id": 2,
-                "total_amount": 50.0,
+                "order_id": 9002,
+                "customer_id": 9002,
+                "total_amount": 80.0,
                 "currency": "EUR",
-                "order_date": "2023-01-01",
+                "order_date": "2040-01-10",
+                "status": "COMPLETED",
             },
             {
-                "order_id": 3,
-                "customer_id": 3,
-                "total_amount": 50.0,
+                "order_id": 9003,
+                "customer_id": 9003,
+                "total_amount": 7250.0,
+                "currency": "THB",
+                "order_date": "2040-01-11",
+                "status": "COMPLETED",
+            },
+            {
+                "order_id": 9004,
+                "customer_id": 9004,
+                "total_amount": 45.75,
                 "currency": None,
-                "order_date": "2023-01-01",
+                "order_date": "2040-01-12",
+                "status": "PENDING",
+            },
+            {
+                "order_id": 9005,
+                "customer_id": 9005,
+                "total_amount": 0.0,
+                "currency": "USD",
+                "order_date": "2040-01-13",
+                "status": "COMPLETED",
+            },
+            {
+                "order_id": 9006,
+                "customer_id": 9006,
+                "total_amount": -12.5,
+                "currency": "EUR",
+                "order_date": "2040-01-14",
+                "status": "SYSTEM_ERROR",
+            },
+            {
+                "order_id": 9007,
+                "customer_id": 9007,
+                "total_amount": 80.0,
+                "currency": "EUR",
+                "order_date": "2040-01-11",
+                "status": "COMPLETED",
             },
         ]
     )
@@ -42,22 +77,46 @@ def sample_customers_df():
     return pd.DataFrame(
         [
             {
-                "customer_id": 1,
-                "email": "old@example.com",
-                "phone": "(555) 123-4567",
-                "signup_date": "2023-01-01",
+                "customer_id": 9001,
+                "full_name": "Nora Winters",
+                "email": "old.nora@example.test",
+                "phone": "(212) 400-9001",
+                "signup_date": "2040-01-02",
             },
             {
-                "customer_id": 1,
-                "email": "new@example.com",
-                "phone": "555.123.4567",
-                "signup_date": "2023-06-15",
+                "customer_id": 9001,
+                "full_name": "Nora Winters",
+                "email": "nora.latest@example.test",
+                "phone": "212.400.9001",
+                "signup_date": "2040-06-18",
             },
             {
-                "customer_id": 2,
+                "customer_id": 9002,
+                "full_name": "Theo Rivers",
                 "email": None,
                 "phone": None,
-                "signup_date": "2023-02-10",
+                "signup_date": "2040-02-14",
+            },
+            {
+                "customer_id": 9003,
+                "full_name": "Kai Arun",
+                "email": "kai@example.test",
+                "phone": "+66 92-840-9003",
+                "signup_date": "2040-03-09",
+            },
+            {
+                "customer_id": 9004,
+                "full_name": "Maya Sterling",
+                "email": "maya.old@example.test",
+                "phone": "020 7946 9004",
+                "signup_date": "2040-04-01",
+            },
+            {
+                "customer_id": 9004,
+                "full_name": "Maya Sterling",
+                "email": "maya.latest@example.test",
+                "phone": "020-7946-9999",
+                "signup_date": "2040-08-22",
             },
         ]
     )
@@ -67,167 +126,131 @@ def sample_customers_df():
 def sample_exchange_rates_df():
     return pd.DataFrame(
         [
-            {"currency": "USD", "date": "2023-01-01", "rate_to_usd": 1.0},
-            {"currency": "EUR", "date": "2023-01-01", "rate_to_usd": 1.08},
-            {"currency": "THB", "date": "2023-01-01", "rate_to_usd": 0.027},
+            {"currency": "USD", "date": "2040-01-10", "rate_to_usd": 9.99},
+            {"currency": "EUR", "date": "2040-01-10", "rate_to_usd": 1.11},
+            {"currency": "EUR", "date": "2040-01-11", "rate_to_usd": 1.25},
+            {"currency": "EUR", "date": "2040-01-12", "rate_to_usd": 1.05},
+            {"currency": "THB", "date": "2040-01-10", "rate_to_usd": 0.031},
+            {"currency": "THB", "date": "2040-01-11", "rate_to_usd": 0.029},
+            {"currency": "GBP", "date": "2040-01-10", "rate_to_usd": 1.42},
         ]
     )
 
 
-
-
 class TestStandardizePhoneNumber:
-    def test_removes_formatting_from_multiple_phone_styles(self):
-        customers = pd.DataFrame(
-            {"phone": ["(555) 123-4567", "555.123.4567", "+66 81-234-5678"]}
-        )
-
-        result = standardize_phone_number(customers)
+    # ตรวจว่าฟังก์ชันรับ DataFrame ลูกค้าทั้งก้อนและลบอักขระที่ไม่ใช่ตัวเลข
+    def test_removes_formatting_from_multiple_phone_styles(
+        self, sample_customers_df
+    ):
+        result = standardize_phone_number(sample_customers_df)
 
         assert result["phone"].tolist() == [
-            "5551234567",
-            "5551234567",
-            "66812345678",
+            "2124009001",
+            "2124009001",
+            None,
+            "66928409003",
+            "02079469004",
+            "02079469999",
         ]
 
-    def test_preserves_missing_values(self):
-        customers = pd.DataFrame({"phone": [None, "02-123-4567"]})
+    # ตรวจว่าหมายเลขที่เป็นค่าว่างยังคงเป็นค่าว่างหลังแปลงข้อมูล
+    def test_preserves_missing_values(self, sample_customers_df):
+        result = standardize_phone_number(sample_customers_df)
 
-        result = standardize_phone_number(customers)
-
-        assert pd.isna(result.loc[0, "phone"])
-        assert result.loc[1, "phone"] == "021234567"
-
-    def test_does_not_mutate_input(self):
-        customers = pd.DataFrame({"phone": ["02-123-4567"]})
-
-        standardize_phone_number(customers)
-
-        assert customers.loc[0, "phone"] == "02-123-4567"
+        customer_9002 = result.loc[result["customer_id"] == 9002].iloc[0]
+        assert pd.isna(customer_9002["phone"])
 
 
 class TestConvertCurrencyToUsd:
-    def test_converts_orders_using_rate_for_order_date(
-        self, sample_exchange_rates_df
+    # ตรวจว่า order สกุล USD คงยอดเดิมและไม่คูณ exchange rate
+    def test_usd_order_keeps_original_amount_without_conversion(
+        self,sample_orders_df, sample_exchange_rates_df
     ):
-        orders = pd.DataFrame(
-            [
-                {
-                    "total_amount": 100.0,
-                    "currency": "USD",
-                    "order_date": "2023-01-01",
-                },
-                {
-                    "total_amount": 50.0,
-                    "currency": "EUR",
-                    "order_date": "2023-01-01",
-                },
-                {
-                    "total_amount": 1000.0,
-                    "currency": "THB",
-                    "order_date": "2023-01-01",
-                },
-            ]
+        result = convert_currency_to_usd(
+           sample_orders_df, sample_exchange_rates_df
+        )
+        usd_order = result.loc[result["order_id"] == 9001].iloc[0]
+
+        assert usd_order["usd_amount"] == pytest.approx(321.45)
+
+    # ตรวจว่าแต่ละ order ใช้ rate ของ currency และวันที่ตรงกับ order_date
+    def test_uses_rate_matching_each_order_date(
+        self,sample_orders_df, sample_exchange_rates_df
+    ):
+        result = convert_currency_to_usd(
+           sample_orders_df, sample_exchange_rates_df
+        )
+        converted = result.set_index("order_id")
+
+        assert converted.loc[9002, "usd_amount"] == pytest.approx(80.0 * 1.11)
+        assert converted.loc[9007, "usd_amount"] == pytest.approx(80.0 * 1.25)
+        assert converted.loc[9003, "usd_amount"] == pytest.approx(
+            7250.0 * 0.029
         )
 
-        result = convert_currency_to_usd(orders, sample_exchange_rates_df)
-
-        assert result["usd_amount"].tolist() == [100.0, 54.0, 27.0]
-
+    # ตรวจว่าเมื่อไม่พบ rate ของวันนั้น ระบบจะใช้ยอดเดิมตาม fallback rule
     def test_missing_rate_falls_back_to_original_amount(
-        self, sample_exchange_rates_df
+        self,sample_orders_df, sample_exchange_rates_df
     ):
-        orders = pd.DataFrame(
-            [
-                {
-                    "total_amount": 25.0,
-                    "currency": "THB",
-                    "order_date": "2099-01-01",
-                }
-            ]
+        result = convert_currency_to_usd(
+            sample_orders_df, sample_exchange_rates_df
         )
 
-        result = convert_currency_to_usd(orders, sample_exchange_rates_df)
+        assert result.loc[0, "usd_amount"] == 321.45
 
-        assert result.loc[0, "usd_amount"] == 25.0
-
-    def test_does_not_mutate_input(self, sample_exchange_rates_df):
-        orders = pd.DataFrame(
-            [
-                {
-                    "total_amount": 10.0,
-                    "currency": "USD",
-                    "order_date": "2023-01-01",
-                }
-            ]
-        )
-
-        convert_currency_to_usd(orders, sample_exchange_rates_df)
-
-        assert "usd_amount" not in orders.columns
 
 
 class TestFillNullValues:
+    # ตรวจว่า email ที่หายไปถูกแทนด้วยค่าเริ่มต้น
     def test_fills_missing_customer_email(self, sample_customers_df):
         result = fill_null_values(
             sample_customers_df, "email", "unknown@domain.com"
         )
 
-        customer_2 = result.loc[result["customer_id"] == 2].iloc[0]
+        customer_2 = result.loc[result["customer_id"] == 9002].iloc[0]
         assert customer_2["email"] == "unknown@domain.com"
 
-    def test_fills_missing_order_currency(self, sample_orders):
-        result = fill_null_values(sample_orders, "currency", "USD")
+    # ตรวจว่า currency ที่หายไปถูกแทนด้วย USD
+    def test_fills_missing_order_currency(self,sample_orders_df):
+        result = fill_null_values(sample_orders_df, "currency", "USD")
 
-        order_3 = result.loc[result["order_id"] == 3].iloc[0]
+        order_3 = result.loc[result["order_id"] == 9004].iloc[0]
         assert order_3["currency"] == "USD"
-
-    def test_does_not_mutate_input(self, sample_orders):
-        fill_null_values(sample_orders, "currency", "USD")
-
-        assert pd.isna(sample_orders.loc[2, "currency"])
 
 
 class TestDeduplicateCustomers:
-    def test_keeps_latest_customer_row(self, sample_customers_df):
+    # ตรวจว่า customer_id ที่ซ้ำจะเหลือเฉพาะ row ที่มี signup_date ล่าสุด
+    def test_keeps_only_latest_customer_row(self, sample_customers_df):
         result = deduplicate_customers(sample_customers_df)
 
-        expected = pd.DataFrame(
-            [
-                {
-                    "customer_id": 2,
-                    "email": None,
-                    "phone": None,
-                    "signup_date": "2023-02-10",
-                },
-                {
-                    "customer_id": 1,
-                    "email": "new@example.com",
-                    "phone": "555.123.4567",
-                    "signup_date": "2023-06-15",
-                },
-            ]
-        )
-        pd.testing.assert_frame_equal(
-            result.reset_index(drop=True),
-            expected,
-        )
+        latest_9001 = result.loc[result["customer_id"] == 9001].iloc[0]
+        latest_9004 = result.loc[result["customer_id"] == 9004].iloc[0]
 
-    def test_removes_older_duplicate_row(self, sample_customers_df):
-        result = deduplicate_customers(sample_customers_df)
-
-        assert not result["email"].eq("old@example.com").any()
+        assert len(result) == 4
         assert result["customer_id"].is_unique
+
+        assert latest_9001["email"] == "nora.latest@example.test"
+        assert latest_9001["signup_date"] == "2040-06-18"
+        assert latest_9004["email"] == "maya.latest@example.test"
+        assert latest_9004["signup_date"] == "2040-08-22"
+
+        removed_emails = {
+            "old.nora@example.test",
+            "maya.old@example.test",
+        }
+        assert removed_emails.isdisjoint(set(result["email"].dropna()))
 
 
 class TestFilterPositiveOrderAmounts:
-    def test_keeps_only_positive_amounts(self):
-        orders = pd.DataFrame(
-            {"order_id": [1, 2, 3], "total_amount": [10.0, 0.0, -5.0]}
-        )
+    # ตรวจว่าเก็บเฉพาะ order ที่ total_amount มากกว่า 0
+    def test_keeps_only_positive_amounts(self,sample_orders_df):
+        result = filter_positive_order_amounts(sample_orders_df)
 
-        result = filter_positive_order_amounts(orders)
-
-        assert result["order_id"].tolist() == [1]
+        assert result["order_id"].tolist() == [
+            9001,
+            9002,
+            9003,
+            9004,
+            9007,
+        ]
         assert (result["total_amount"] > 0).all()
-

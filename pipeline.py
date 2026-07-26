@@ -44,7 +44,6 @@ def create_tables(cursor):
     """)
 
 def fill_null_values(df: pd.DataFrame, column_name: str, fill_value: object) -> pd.DataFrame:
-    df = df.copy()
     if column_name in df.columns:
         df[column_name] = df[column_name].fillna(fill_value)
     return df
@@ -52,35 +51,34 @@ def fill_null_values(df: pd.DataFrame, column_name: str, fill_value: object) -> 
 def standardize_phone_number(df: pd.DataFrame, column_name: str = "phone") -> pd.DataFrame:
     if column_name not in df.columns:
         raise KeyError(f"Column not found: {column_name}")
-    result = df.copy()
-    result[column_name] = (
-        result[column_name].str.replace(r"\D", "", regex=True)
+    df[column_name] = (
+        df[column_name].str.replace(r"\D", "", regex=True)
     )
-    return result
+    return df
 
 def deduplicate_customers(df_customers: pd.DataFrame) -> pd.DataFrame:
     return (
         df_customers.sort_values("signup_date")
         .drop_duplicates(subset="customer_id", keep="last")
-        .copy()
+        
     )
 
 def convert_currency_to_usd(orders: pd.DataFrame, exchange_rates: pd.DataFrame) -> pd.DataFrame:
   
-    result = orders.copy().merge(
+    df = orders.merge(
         exchange_rates,
         left_on=["currency", "order_date"],
         right_on=["currency", "date"],
         how="left",
     )
-    effective_rate = result["rate_to_usd"].where(
-        result["currency"].ne("USD"), 1.0
+    effective_rate = df["rate_to_usd"].where(
+        df["currency"].ne("USD"), 1.0
     )
-    result["usd_amount"] = result["total_amount"] * effective_rate.fillna(1.0)
-    return result
+    df["usd_amount"] = df["total_amount"] * effective_rate.fillna(1.0)
+    return df
 
 def filter_positive_order_amounts(df: pd.DataFrame, column_name: str = "total_amount") -> pd.DataFrame:
-    return df.loc[df[column_name] > 0].copy()
+    return df.loc[df[column_name] > 0]
 
 @task
 def extract_data(db_path: str = "shopdata.db")-> pd.DataFrame:
